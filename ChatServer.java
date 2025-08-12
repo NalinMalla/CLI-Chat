@@ -3,8 +3,6 @@ package Socket_Programming.CLI_Chat;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,10 +34,9 @@ public class ChatServer extends Thread {
         System.out.println("Broadcasting Client List with " + clientName + " to all clients.");
         StringBuilder clientInfo = new StringBuilder();
         for (String address : clientDetails.keySet()) {
-            if(connectedClients.containsKey(address)){
+            if (connectedClients.containsKey(address)) {
                 clientInfo.append(address).append("&bOnline").append("&nbsp");
-            }
-            else{
+            } else {
                 clientInfo.append(address).append("&bOffLine").append("&nbsp");
             }
         }
@@ -52,8 +49,9 @@ public class ChatServer extends Thread {
     }
 
     File getClientFile() throws IOException {
-        Path currentDirPath = Paths.get("src", "main", "java", "Socket_Programming", "CLI_Chat", "Chat_Files");
-        File dir = new File(currentDirPath.toString());
+//        Path currentDirPath = Paths.get("src", "main", "java", "Socket_Programming", "CLI_Chat", "Chat_Files");
+//        File dir = new File(currentDirPath.toString());
+        File dir = new File("Chat_Files");
         if (!dir.exists()) {
             dir.mkdirs();
         }
@@ -91,8 +89,9 @@ public class ChatServer extends Thread {
 
 
     File getChatFile(String clientName, String chatPartner) throws IOException {
-        Path currentDirPath = Paths.get("src", "main", "java", "Socket_Programming", "CLI_Chat", "Chat_Files");
-        File dir = new File(currentDirPath.toString(), clientName);
+//        Path currentDirPath = Paths.get("src", "main", "java", "Socket_Programming", "CLI_Chat", "Chat_Files");
+//        File dir = new File(currentDirPath.toString(), clientName);
+        File dir = new File("Chat_Files", clientName);
         if (!dir.exists()) {
             dir.mkdirs();
         }
@@ -231,18 +230,17 @@ public class ChatServer extends Thread {
                         throw new RuntimeException(e);
                     }
                 } else if ((msg.length == 3)) {
-                    if (receiversSocket != null) {
-                        try {
+                    try {
+                        saveChatLocally(clientName, receiversName, inboundMsg);
+                        saveChatLocally(receiversName, clientName, inboundMsg);
+                        if (receiversSocket != null) {
                             PrintWriter outToReceiver = new PrintWriter(receiversSocket.getOutputStream(), true);
                             outToReceiver.println(inboundMsg);
-                            saveChatLocally(clientName, receiversName, inboundMsg);
-                            saveChatLocally(receiversName, clientName, inboundMsg);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
                         }
-                    } else {
-                        out.println("Server: Error! Destination client could not be found.");
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
                     }
+
                 } else {
                     out.println("Server: Error! Invalid message.");
                 }
