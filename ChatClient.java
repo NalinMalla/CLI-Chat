@@ -27,10 +27,10 @@ public class ChatClient {
     ;
     MODE currentMode;
 
-    ChatClient() {
-        sc = new Scanner(System.in);
+    void initializeCurrentMode() {
         char loginMode = 'x';
         while (loginMode == 'x') {
+            System.out.print("\033[H\033[2J");      // Clears output terminal
             System.out.print("Do you wish to: \na) Login to you exiting account.\nb) Create a new account. \nInput either a or b. \n>:");
             loginMode = sc.nextLine().charAt(0);
             switch (loginMode) {
@@ -47,7 +47,11 @@ public class ChatClient {
                     loginMode = 'x';
             }
         }
+    }
 
+    ChatClient() {
+        sc = new Scanner(System.in);
+        initializeCurrentMode();
         this.newlyDetectedClients = new AtomicInteger();
     }
 
@@ -67,20 +71,22 @@ public class ChatClient {
 
     void credentialValidation() {
         if (clientName.trim().isEmpty() || clientPassword.trim().isEmpty()) {
-            System.out.println("Invalid Input: Username and Password cannot be empty.");
-            System.out.println("Press enter to continue");
             clientName = "";
             clientPassword = "";
+            System.out.println("Invalid Input: Username and Password cannot be empty.");
+            System.out.println("Press enter to continue");
             sc.nextLine();
         }
+
         if (!clientPassword.isEmpty() && currentMode == MODE.SIGNUP) {
             System.out.print("Confirm Password: ");
             String confirmPassword = sc.nextLine();
+
             if (!clientPassword.equals(confirmPassword)) {
-                System.out.println("Error: The passwords you have inputted don't match.");
-                System.out.println("Press enter to continue");
                 clientName = "";
                 clientPassword = "";
+                System.out.println("Error: The passwords you have inputted don't match.");
+                System.out.println("Press enter to continue");
                 sc.nextLine();
             }
         }
@@ -96,7 +102,7 @@ public class ChatClient {
         return false;
     }
 
-    void displayLogin() {
+    synchronized void displayLogin() {
         System.out.print("\033[H\033[2J");      // Clears output terminal
         System.out.println(currentMode == MODE.LOGIN ? "LOGIN" : "SIGNUP");
         System.out.println("------");
@@ -105,7 +111,7 @@ public class ChatClient {
         }
     }
 
-    void displayDashboard() {
+    synchronized void displayDashboard() {
         System.out.print("\033[H\033[2J");      // Clears output terminal
         System.out.println("DASHBOARD");
         System.out.println("---------");
@@ -127,7 +133,7 @@ public class ChatClient {
         }
     }
 
-    void displayChat() {
+    synchronized void displayChat() {
         System.out.print("\033[H\033[2J");      // Clears output terminal
         System.out.println("CHAT ROOM (" + clientName + "->" + sendTo + ")");
         System.out.println("-------------------------------------------");
@@ -153,6 +159,110 @@ public class ChatClient {
             this.clientSocket = clientSocket;
         }
 
+        void checkAuthTypeValidity() {
+            if (serverMsg.equals("Server: An account with username " + clientName + " already exists.") || serverMsg.equals("Server: Account with username " + clientName + " doesn't exists.")) {
+                clientName = "";
+                clientPassword = "";
+                System.out.print("\033[H\033[2J");      // Clears output terminal
+                System.out.println(serverMsg);
+                if (serverMsg.equals("Server: An account with username " + clientName + " already exists.")) {
+                    System.out.println("Try logging into this existing account.");
+                }
+
+                if (serverMsg.equals("Server: Account with username " + clientName + " doesn't exists.")) {
+                    System.out.println("You may not have an account yet. Try creating new account using this username.");
+                }
+                System.out.println("Press enter to return to the main menu.");
+                sc.nextLine();
+                initializeCurrentMode();
+            }
+        }
+
+        void checkAuthSuccess() {
+            if (serverMsg.equals("Server: Welcome back " + clientName) || serverMsg.equals("Server: New client with username " + clientName + " created.")) {
+                currentMode = MODE.DASHBOARD;
+            }
+        }
+
+        void authenticateUser(PrintWriter out) {
+            if (clientName.isEmpty()) {
+                System.out.print("Username: ");
+                clientName = sc.nextLine();
+                System.out.print("Password: ");
+                clientPassword = sc.nextLine();
+
+                credentialValidation();
+
+                if (!clientName.isEmpty() && !clientPassword.isEmpty()) {
+                    System.out.println("Sending user credential to server.");
+                    out.println(clientName);
+                    if (currentMode == MODE.LOGIN) {
+                        out.println("LOGIN");
+                    }
+                    if (currentMode == MODE.SIGNUP) {
+                        out.println("SIGNUP");
+                    }
+                    out.println(clientPassword);
+//                    while (serverMsg.isEmpty()) {
+//                        System.out.println("Waiting for server authentication response.");
+//                    }
+                }
+            }
+        }
+
+        void handleUserAuthentication(PrintWriter out) {
+            checkAuthTypeValidity();
+
+            checkAuthSuccess();
+
+            authenticateUser(out);
+        }
+
+        void handleDashboardOutput(PrintWriter out) {
+            sendTo = sc.nextLine();
+
+            System.out.print("\033[H\033[2J");
+            if (sendTo.isEmpty()) {
+                System.out.println("No input for client address was given.");
+            }
+
+            if (sendTo.equals("&exit")) {
+                outboundMsg = "&exit";
+            }
+
+            if (!sendTo.isEmpty() && !sendTo.equals("&exit")) {
+                if (clientInList()) {
+                    System.out.println("You are about enter into a chat room with " + sendTo + ".");
+                    out.println(sendTo);
+                    currentMode = MODE.CHAT;
+                } else {
+                    System.out.println("Client not found in list.");
+                    sendTo = "";
+                }
+            }
+            System.out.println("Press Enter to continue.");
+            sc.nextLine();
+        }
+
+        void handleChatOutput(PrintWriter out) {
+            outboundMsg = sc.nextLine();
+            if (!outboundMsg.equals("&exit")) {
+                if (outboundMsg.equals("&switch")) {
+                    out.println(outboundMsg);
+                    sendTo = "";
+                    chatHistory = null;
+                    currentMode = MODE.DASHBOARD;
+                }
+
+                if (!outboundMsg.equals("&switch") && chatHistory != null) {
+                    outboundMsg = clientName + "&nbsp" + getCurrentDateTime() + "&nbsp" + outboundMsg;
+                    out.println(outboundMsg);
+                    chatHistory.add(outboundMsg);
+                    outboundMsg = "";
+                }
+            }
+        }
+
         @Override
         public synchronized void run() {
             try (
@@ -161,73 +271,25 @@ public class ChatClient {
                 while (!outboundMsg.equals("&exit")) {
                     if (currentMode == MODE.LOGIN || currentMode == MODE.SIGNUP) {
                         displayLogin();
-                        if (serverMsg.equals("Server: Welcome back " + clientName) || serverMsg.equals("Server: New client with username " + clientName + " created.")) {
-                            currentMode = MODE.DASHBOARD;
-                            serverMsg = "";
-                        } else if (inboundMsg.equals("Server: Client Authentication.")) {
-                            System.out.print("Username: ");
-                            clientName = sc.nextLine();
-                            System.out.print("Password: ");
-                            clientPassword = sc.nextLine();
+                        handleUserAuthentication(out);
+                    }
 
-                            credentialValidation();
-
-                            if (!clientName.isEmpty() && !clientPassword.isEmpty()) {
-                                out.println(clientName);
-                                if (currentMode == MODE.LOGIN) {
-                                    out.println("LOGIN");
-                                } else {
-                                    out.println("SIGNUP");
-                                }
-                                out.println(clientPassword);
-                            }
-                        }
-                    } else if (sendTo.isEmpty() && currentMode == MODE.DASHBOARD) {
+                    if (currentMode == MODE.DASHBOARD) {
                         displayDashboard();
-                        sendTo = sc.nextLine();
+                        handleDashboardOutput(out);
+                    }
 
-                        System.out.print("\033[H\033[2J");
-                        if (sendTo.isEmpty()) {
-                            System.out.println("No input for client address was given.");
-                        } else if (sendTo.equals("&exit")) {
-                            outboundMsg = "&exit";
-                            break;
-                        } else {
-                            if (clientInList()) {
-                                System.out.println("You are about enter into a chat room with " + sendTo + ".");
-                                out.println(sendTo);
-                                currentMode = MODE.CHAT;
-                            } else {
-                                System.out.println("Client not found in list.");
-                                sendTo = "";
-                            }
-                        }
-                        System.out.println("Press Enter to continue.");
-                        sc.nextLine();
-                    } else if (currentMode == MODE.CHAT) {
-                        if (!sendTo.isEmpty()) {
+                    if (currentMode == MODE.CHAT) {
+                        if (!sendTo.isEmpty() && chatHistory != null) {
                             displayChat();
-                            if (chatHistory != null) {
-                                outboundMsg = sc.nextLine();
-                                if (!outboundMsg.equals("&exit")) {
-                                    if (outboundMsg.equals("&switch")) {
-                                        out.println(outboundMsg);
-                                        sendTo = "";
-                                        chatHistory = null;
-                                        currentMode = MODE.DASHBOARD;
-                                    } else if (chatHistory != null) {
-                                        outboundMsg = clientName + "&nbsp" + getCurrentDateTime() + "&nbsp" + outboundMsg;
-                                        out.println(outboundMsg);
-                                        chatHistory.add(outboundMsg);
-                                        outboundMsg = "";
-                                    }
-                                }
-                            }
+                            handleChatOutput(out);
+                        }
 
-                        } else {
+                        if (sendTo.isEmpty() || chatHistory == null) {
                             currentMode = MODE.DASHBOARD;
                         }
                     }
+                    serverMsg = "";
                 }
                 out.println("&exit");
             } catch (IOException e) {
@@ -243,20 +305,25 @@ public class ChatClient {
             this.clientSocket = clientSocket;
         }
 
+        void readInboundMsg(BufferedReader in){
+            try {
+                inboundMsg = in.readLine();
+                if (inboundMsg == null) {
+                    inboundMsg = "";
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
         @Override
         public synchronized void run() {
             try (
                     BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             ) {
                 while (!outboundMsg.equals("&exit")) {
-                    try {
-                        inboundMsg = in.readLine();
-                        if (inboundMsg == null) {
-                            inboundMsg = "";
-                        }
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
+                    readInboundMsg(in);
+
                     if (inboundMsg.equals("Server: Client Authentication.")) {
                         System.out.println(inboundMsg);
                     } else if (inboundMsg.equals("Server: New Client Found.")) {
