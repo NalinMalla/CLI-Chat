@@ -151,18 +151,12 @@ public class ChatServer extends Thread {
                     clientPassword = "";
                 }
 
-                if (!clientCredentials.containsKey(clientName) && clientCredentials.get(clientName).equals(clientPassword)) {
-                    out.println("Server: Welcome back " + clientName);
-                    System.out.println("Reconnecting with " + clientName);
-                    if (connectedClients.containsKey(clientName)) {
-                        connectedClients.replace(clientName, clientSocket);
-                    } else {
-                        connectedClients.put(clientName, clientSocket);
-                    }
-                } else {
-                    out.println("Server: Incorrect password for " + clientName);
-                    clientName = "";
-                    clientPassword = "";
+                if (!clientCredentials.containsKey(clientName)) {
+                    System.out.println("Adding " + clientName + " to Client List.");
+                    out.println("Server: New client with username " + clientName + " created.");
+                    saveClientLocally(clientName, clientPassword);
+                    clientCredentials.put(clientName, clientPassword);
+                    connectedClients.put(clientName, clientSocket);
                 }
             }
 
@@ -172,12 +166,22 @@ public class ChatServer extends Thread {
                     System.out.println("Server: Account with username " + clientName + " doesn't exists.");
                     clientName = "";
                     clientPassword = "";
-                } else {
-                    System.out.println("Adding " + clientName + " to Client List.");
-                    out.println("Server: New client with username " + clientName + " created.");
-                    saveClientLocally(clientName, clientPassword);
-                    clientCredentials.put(clientName, clientPassword);
-                    connectedClients.put(clientName, clientSocket);
+                }
+
+                if (clientCredentials.containsKey(clientName) && clientCredentials.get(clientName).equals(clientPassword)) {
+                    out.println("Server: Welcome back " + clientName);
+                    System.out.println("Reconnecting with " + clientName);
+                    if (connectedClients.containsKey(clientName)) {
+                        connectedClients.replace(clientName, clientSocket);
+                    } else {
+                        connectedClients.put(clientName, clientSocket);
+                    }
+                }
+
+                if (clientCredentials.containsKey(clientName) && !clientCredentials.get(clientName).equals(clientPassword)) {
+                    out.println("Server: Incorrect password for " + clientName);
+                    clientName = "";
+                    clientPassword = "";
                 }
             }
         }
@@ -188,7 +192,7 @@ public class ChatServer extends Thread {
         String receiversName = "";
 
         while (!inboundMsg.equals("&exit")) {
-            if (receiversSocket == null) {
+            if (receiversName.isEmpty()) {
                 System.out.println("Requesting chat partners name from " + clientName);
             }
             try {
@@ -203,13 +207,14 @@ public class ChatServer extends Thread {
                 continue;
             }
 
+            System.out.println(inboundMsg);
             String[] msg = inboundMsg.split("&nbsp");
             if (msg.length == 1) {      // Case where client is sending only chat partners name.
                 receiversSocket = connectedClients.get(msg[0]);
                 receiversName = msg[0];
                 try {
-                    loadChat(clientName, msg[0]);
-                    String chatHistory = readChatFileToString(clientName, msg[0]);
+                    loadChat(clientName, receiversName);
+                    String chatHistory = readChatFileToString(clientName, receiversName);
                     System.out.println("Syncing Chat History with " + clientName);
                     out.println("Server: Syncing Chat History.");
                     out.println(chatHistory);
@@ -218,7 +223,7 @@ public class ChatServer extends Thread {
                 }
             }
 
-            if ((msg.length == 3)) {      // Case where client is message to chat partner.
+            if ((msg.length == 3) && !receiversName.isEmpty()) {      // Case where client is message to chat partner.
                 try {
                     saveChatLocally(clientName, receiversName, inboundMsg);
                     saveChatLocally(receiversName, clientName, inboundMsg);
@@ -229,9 +234,6 @@ public class ChatServer extends Thread {
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
-
-            } else {
-                out.println("Server: Error! Invalid message.");
             }
         }
     }
@@ -268,6 +270,7 @@ public class ChatServer extends Thread {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
+        System.out.print("\033[H\033[2J");      // Clears output terminal
         while (ChatServer.numberOfActiveConnections.getPlain() < 100) {
             System.out.println("Waiting for a new client to connect with server.");
             Socket clientSocket = serverSocket.accept();

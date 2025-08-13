@@ -27,11 +27,11 @@ public class ChatClient {
     ;
     MODE currentMode;
 
-    void initializeCurrentMode() {
-        char loginMode = 'x';
-        while (loginMode == 'x') {
+    boolean isCurrentModelInitialized() {
+        char loginMode = 'c';
+        while (loginMode == 'c') {
             System.out.print("\033[H\033[2J");      // Clears output terminal
-            System.out.print("Do you wish to: \na) Login to you exiting account.\nb) Create a new account. \nInput either a or b. \n>:");
+            System.out.print("Do you wish to: \na) Login to you exiting account.\nb) Create a new account. \nInput either a or b to continue and x to exit. \n>:");
             loginMode = sc.nextLine().charAt(0);
             switch (loginMode) {
                 case 'a':
@@ -42,16 +42,24 @@ public class ChatClient {
                     this.currentMode = MODE.SIGNUP;
                     break;
 
+                case 'x':
+                    return false;
+
                 default:
-                    System.out.println("Invalid Input.");
-                    loginMode = 'x';
+                    loginMode = 'c';
             }
         }
+
+        return true;
     }
 
     ChatClient() {
         sc = new Scanner(System.in);
-        initializeCurrentMode();
+        if (!isCurrentModelInitialized()) {
+            outboundMsg = "&exit";
+            System.out.println("Exiting Program.");
+//            return;
+        }
         this.newlyDetectedClients = new AtomicInteger();
     }
 
@@ -106,7 +114,7 @@ public class ChatClient {
         System.out.print("\033[H\033[2J");      // Clears output terminal
         System.out.println(currentMode == MODE.LOGIN ? "LOGIN" : "SIGNUP");
         System.out.println("------");
-        if (!serverMsg.isEmpty()) {
+        if (!serverMsg.isEmpty() && !serverMsg.equals("Server: Client Authentication.")) {
             System.out.println(serverMsg);
         }
     }
@@ -174,7 +182,7 @@ public class ChatClient {
                 }
                 System.out.println("Press enter to return to the main menu.");
                 sc.nextLine();
-                initializeCurrentMode();
+                isCurrentModelInitialized();
             }
         }
 
@@ -203,9 +211,6 @@ public class ChatClient {
                         out.println("SIGNUP");
                     }
                     out.println(clientPassword);
-//                    while (serverMsg.isEmpty()) {
-//                        System.out.println("Waiting for server authentication response.");
-//                    }
                 }
             }
         }
@@ -305,7 +310,7 @@ public class ChatClient {
             this.clientSocket = clientSocket;
         }
 
-        void readInboundMsg(BufferedReader in){
+        void readInboundMsg(BufferedReader in) {
             try {
                 inboundMsg = in.readLine();
                 if (inboundMsg == null) {
@@ -325,7 +330,6 @@ public class ChatClient {
                     readInboundMsg(in);
 
                     if (inboundMsg.equals("Server: Client Authentication.")) {
-                        System.out.println(inboundMsg);
                     } else if (inboundMsg.equals("Server: New Client Found.")) {
                         try {
                             inboundMsg = in.readLine();
