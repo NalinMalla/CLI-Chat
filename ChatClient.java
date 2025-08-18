@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicInteger;
 
-
 public class ChatClient {
     String clientName = "";
     String clientPassword = "";
@@ -27,7 +26,12 @@ public class ChatClient {
     ;
     MODE currentMode;
 
-    boolean isCurrentModelInitialized() {
+    ChatClient() {
+        sc = new Scanner(System.in);
+        this.newlyDetectedClients = new AtomicInteger();
+    }
+
+    boolean isCurrentModeInitialized() {
         char loginMode = 'c';
         while (loginMode == 'c') {
             System.out.print("\033[H\033[2J");      // Clears output terminal
@@ -53,15 +57,6 @@ public class ChatClient {
         return true;
     }
 
-    ChatClient() {
-        sc = new Scanner(System.in);
-        if (!isCurrentModelInitialized()) {
-            outboundMsg = "&exit";
-            System.out.println("Exiting Program.");
-//            return;
-        }
-        this.newlyDetectedClients = new AtomicInteger();
-    }
 
     String getCurrentDateTime() {
         LocalDateTime now = LocalDateTime.now();
@@ -182,13 +177,20 @@ public class ChatClient {
                 }
                 System.out.println("Press enter to return to the main menu.");
                 sc.nextLine();
-                isCurrentModelInitialized();
+                if (!isCurrentModeInitialized()) {
+                    outboundMsg = "&exit";
+                }
             }
         }
 
         void checkAuthSuccess() {
             if (serverMsg.equals("Server: Welcome back " + clientName) || serverMsg.equals("Server: New client with username " + clientName + " created.")) {
                 currentMode = MODE.DASHBOARD;
+            }
+
+            if (serverMsg.equals("Server: Incorrect password for " + clientName)) {
+                clientName = "";
+                clientPassword = "";
             }
         }
 
@@ -362,23 +364,27 @@ public class ChatClient {
 
 
     public void activateChat() {
-        ReceiveInboundMsg inbound = null;
-        SendOutboundMsg outbound = null;
-        try (
-                Socket clientSocket = new Socket("127.0.0.1", 1234);
-        ) {
-            inbound = new ReceiveInboundMsg(clientSocket);
-            outbound = new SendOutboundMsg(clientSocket);
+        if (isCurrentModeInitialized()) {
+            ReceiveInboundMsg inbound = null;
+            SendOutboundMsg outbound = null;
+            try (
+                    Socket clientSocket = new Socket("127.0.0.1", 1234);
+            ) {
+                inbound = new ReceiveInboundMsg(clientSocket);
+                outbound = new SendOutboundMsg(clientSocket);
 
-            inbound.start();
-            outbound.start();
+                inbound.start();
+                outbound.start();
 
-            inbound.join();
-            outbound.join();
-        } catch (IOException | InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            System.out.println("Deactivating client " + clientName + "\n");
+                inbound.join();
+                outbound.join();
+            } catch (IOException | InterruptedException e) {
+                throw new RuntimeException(e);
+            } finally {
+                System.out.println("Deactivating client " + clientName + "\n");
+            }
+        } else {
+            System.out.println("Exiting Program.");
         }
     }
 
