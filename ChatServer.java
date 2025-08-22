@@ -6,17 +6,18 @@ import java.net.Socket;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.security.SecureRandom;
 
 public class ChatServer extends Thread {
+    final static String DELIMITER = ";";
     static ServerSocket serverSocket;
     static Map<String, Socket> connectedClients = new ConcurrentHashMap<>();     // We aren't using normal HashMap as like StringBuilder it is not built for multi-threaded operations.
     static Map<String, String> clientCredentials = null;        // Like connectedClients key = clientName but value = clientPassword
+    static Map<Integer, String> sessions = new ConcurrentHashMap<>();
     static AtomicInteger numberOfActiveConnections = new AtomicInteger(0);
-    Socket clientSocket = null;
-    ArrayList<String> chatHistory = new ArrayList<>();
-    String clientName = "";
-    String clientPassword = "";
-    String inboundMsg = "";
+    Socket clientSocket;
+    String[] request;
+    String response = "";
 
     static {
         try {
@@ -30,25 +31,20 @@ public class ChatServer extends Thread {
         this.clientSocket = clientSocket;
     }
 
-    void broadcastClientList() throws IOException {
-        System.out.println("Broadcasting Client List with " + clientName + " to all clients.");
+    String getClientNames() {
         StringBuilder clientInfo = new StringBuilder();
         for (String address : clientCredentials.keySet()) {
             if (connectedClients.containsKey(address)) {
-                clientInfo.append(address).append("&bOnline").append("&nbsp");
+                clientInfo.append(address).append("&bOnline").append(DELIMITER);
             } else {
-                clientInfo.append(address).append("&bOffLine").append("&nbsp");
+                clientInfo.append(address).append("&bOffLine").append(DELIMITER);
             }
         }
 
-        for (Socket socket : connectedClients.values()) {
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-            out.println("Server: New Client Found.");
-            out.println(clientInfo);
-        }
+        return clientInfo.toString();
     }
 
-    File getClientFile() throws IOException {
+    File getClientFile() {
         File dir = new File("Chat_Files");
         if (!dir.exists()) {
             dir.mkdirs();
@@ -56,26 +52,34 @@ public class ChatServer extends Thread {
 
         File f = new File(dir, "ClientList.txt");
         if (!f.exists()) {
-            f.createNewFile();
+            try {
+                f.createNewFile();
+            } catch (IOException e) {
+                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not create client list file.");
+                throw new RuntimeException(e);
+            }
         }
 
         return f;
     }
 
-    void saveClientLocally(String userName, String userPassword) throws IOException {
+    void saveClientLocally(String userName, String userPassword) {
         File f = getClientFile();
         try (FileWriter fWrite = new FileWriter(f, true)) {
-            fWrite.write(userName + "&nbsp" + userPassword + System.lineSeparator());
+            fWrite.write(userName + DELIMITER + userPassword + System.lineSeparator());
+        } catch (IOException e) {
+            response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not update client list file.");
+            throw new RuntimeException(e);
         }
     }
 
-    void loadClients() throws IOException {
+    void loadClients() {
         File f = getClientFile();
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
             clientCredentials = new ConcurrentHashMap<>();
             String line;
             while ((line = reader.readLine()) != null) {
-                String[] clientInfo = line.split("&nbsp");
+                String[] clientInfo = line.split(DELIMITER);
                 if (clientInfo.length == 2) {
                     clientCredentials.put(clientInfo[0], clientInfo[1]);
                 }
@@ -85,7 +89,7 @@ public class ChatServer extends Thread {
         }
     }
 
-    File getChatFile(String clientName, String chatPartner) throws IOException {
+    File getChatFile(String clientName, String chatPartner) {
         File dir = new File("Chat_Files", clientName);
         if (!dir.exists()) {
             dir.mkdirs();
@@ -93,25 +97,32 @@ public class ChatServer extends Thread {
 
         File f = new File(dir, (chatPartner + ".txt"));
         if (!f.exists()) {
-            f.createNewFile();
+            try {
+                f.createNewFile();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
 
         return f;
     }
 
-    void saveChatLocally(String clientName, String chatPartner, String inboundMsg) throws IOException {
+    void saveChatLocally(String clientName, String chatPartner, String inboundMsg) {
         File f = getChatFile(clientName, chatPartner);
         if (!inboundMsg.isEmpty()) {
             try (FileWriter fWrite = new FileWriter(f, true)) {
                 fWrite.write(inboundMsg + System.lineSeparator());
+            } catch (IOException e) {
+                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not update chat history in file.");
+                throw new RuntimeException(e);
             }
         }
     }
 
-    void loadChat(String clientName, String chatPartner) throws IOException {
+    ArrayList<String> loadChat(String clientName, String chatPartner) {
         File f = getChatFile(clientName, chatPartner);
+        ArrayList<String> chatHistory = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
-            chatHistory = new ArrayList<>();
             String line;
             while ((line = reader.readLine()) != null) {
                 chatHistory.add(line);
@@ -119,9 +130,10 @@ public class ChatServer extends Thread {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        return chatHistory;
     }
 
-    public String readChatFileToString(String clientName, String chatPartner) throws IOException {
+    public String readChatFileToString(String clientName, String chatPartner) {
         File f = getChatFile(clientName, chatPartner);
         StringBuilder fileContent = new StringBuilder();
 
@@ -137,103 +149,110 @@ public class ChatServer extends Thread {
         return fileContent.toString();
     }
 
-    void authenticateUser(BufferedReader in, PrintWriter out) throws IOException {
-        while (clientName.isEmpty()) {
-            out.println("Server: Client Authentication.");
-            clientName = in.readLine();
-            String loginMode = in.readLine();
-            clientPassword = in.readLine();
+    int generateSessionID(String clientName) {
+        SecureRandom secureRandom = new SecureRandom();
+        int sessionID = secureRandom.nextInt(1000);  // Here, secureRandom was used instead of rand because its output is unpredictable even if an attacker knows part of the system as it pulls entropy from secure system sources.
+        return sessionID;
+    }
 
-            if (loginMode.equals("SIGNUP")) {
-                if (clientCredentials.containsKey(clientName)) {
-                    out.println("Server: An account with username " + clientName + " already exists.");
-                    clientName = "";
-                    clientPassword = "";
-                }
+    String parseSessionIDToUserName() {
+        int sessionID = Integer.parseInt(request[1]);
+        String userName = sessions.get(sessionID);
+        if (userName == null) {
+            response = ("401" + DELIMITER + request[0] + DELIMITER + "Server: Unauthorized to send message due to invalid Session ID.");
+        }
+        return userName;
+    }
 
-                if (!clientCredentials.containsKey(clientName)) {
-                    System.out.println("Adding " + clientName + " to Client List.");
-                    out.println("Server: New client with username " + clientName + " created.");
-                    saveClientLocally(clientName, clientPassword);
-                    clientCredentials.put(clientName, clientPassword);
-                    connectedClients.put(clientName, clientSocket);
-                }
+    void userSignup() {
+        String userName = request[1];
+        String userPassword = request[2];
+        if (clientCredentials.containsKey(userName)) {
+            response = ("406" + DELIMITER + "/signup" + DELIMITER + "Server: An account with username " + userName + " already exists.");
+        }
+
+        if (!clientCredentials.containsKey(userName)) {
+            response = ("201" + DELIMITER + "/signup" + DELIMITER + "Server: New client with username " + userName + " created.");
+            saveClientLocally(userName, userPassword);
+            clientCredentials.put(userName, userPassword);
+            connectedClients.put(userName, clientSocket);
+        }
+    }
+
+    void userLogin() {
+        String userName = request[1];
+        String userPassword = request[2];
+        if (!clientCredentials.containsKey(userName)) {
+            response = ("404" + DELIMITER + "/login" + DELIMITER + "Server: Account with username " + userName + " doesn't exists.");
+        }
+
+        if (clientCredentials.containsKey(userName) && clientCredentials.get(userName).equals(userPassword)) {
+            int sessionID = generateSessionID(userName);
+            sessions.put(sessionID, userName);      // cannot replace sessionID as it will render obsolete the ones being used in other devices without notification.
+            response = ("200" + DELIMITER + "/login" + DELIMITER + sessionID);
+            if (connectedClients.containsKey(userName)) {
+                connectedClients.replace(userName, clientSocket);
+            } else {
+                connectedClients.put(userName, clientSocket);
             }
+        }
 
-            if (loginMode.equals("LOGIN")) {
-                if (!clientCredentials.containsKey(clientName)) {
-                    out.println("Server: Account with username " + clientName + " doesn't exists.");
-                    System.out.println("Server: Account with username " + clientName + " doesn't exists.");
-                    clientName = "";
-                    clientPassword = "";
-                }
+        if (clientCredentials.containsKey(userName) && !clientCredentials.get(userName).equals(userPassword)) {
+            response = ("401" + DELIMITER + "/login" + DELIMITER + "Server: Incorrect password for " + userName);
+        }
+    }
 
-                if (clientCredentials.containsKey(clientName) && clientCredentials.get(clientName).equals(clientPassword)) {
-                    out.println("Server: Welcome back " + clientName);
-                    System.out.println("Reconnecting with " + clientName);
-                    if (connectedClients.containsKey(clientName)) {
-                        connectedClients.replace(clientName, clientSocket);
-                    } else {
-                        connectedClients.put(clientName, clientSocket);
-                    }
-                }
+    void syncChatHistory(String sendersName) {
+        String chatHistory = readChatFileToString(sendersName, request[2]);
+        response = ("200" + DELIMITER + request[0] + DELIMITER + chatHistory);
+    }
 
-                if (clientCredentials.containsKey(clientName) && !clientCredentials.get(clientName).equals(clientPassword)) {
-                    out.println("Server: Incorrect password for " + clientName);
-                    clientName = "";
-                    clientPassword = "";
-                }
+    void rerouteInboundMessage(String sendersName) {
+        String receiversName = request[2];
+        String timestamp = request[3];
+        String msg = request[4];
+        Socket receiversSocket = connectedClients.get(receiversName);
+        String outboundMsg = sendersName + DELIMITER + timestamp + DELIMITER + msg;
+
+        if (receiversSocket != null) {  // Chat partner is online
+            try (PrintWriter outToReceiver = new PrintWriter(receiversSocket.getOutputStream(), true)
+            ) {
+                saveChatLocally(sendersName, receiversName, outboundMsg);
+                saveChatLocally(receiversName, sendersName, outboundMsg);
+                outToReceiver.println(request[0] + DELIMITER + outboundMsg);
+            } catch (IOException e) {
+                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
+                throw new RuntimeException(e);
             }
         }
     }
 
-    void rerouteInboundMessage(BufferedReader in, PrintWriter out) throws IOException {
-        Socket receiversSocket = null;
-        String receiversName = "";
+    void broadcast(String sendersName) {
+        for (Map.Entry<String, Socket> entry : connectedClients.entrySet()) {
+            String receiversName = entry.getKey();
+            Socket receiversSocket = entry.getValue();
 
-        while (!inboundMsg.equals("&exit")) {
-            if (receiversName.isEmpty()) {
-                System.out.println("Requesting chat partners name from " + clientName);
-            }
-            try {
-                inboundMsg = in.readLine();
+            try (PrintWriter out = new PrintWriter(receiversSocket.getOutputStream(), true)
+            ) {
+                String outboundMsg = "";
+                if(request[0].equals("/broadcast")){
+                    String timestamp = request[2];
+                    String msg = request[3];
+                    outboundMsg = (request[0] + DELIMITER + sendersName + DELIMITER + timestamp + DELIMITER + msg);
+                    saveChatLocally(sendersName, receiversName, outboundMsg);
+                    saveChatLocally(receiversName, sendersName, outboundMsg);
+                }
+
+                if(request[0].equals("/broadcastUserList")){
+                    outboundMsg = (request[0] + DELIMITER + getClientNames());
+                }
+
+                if(!outboundMsg.isEmpty()){
+                    out.println("200"+ DELIMITER + outboundMsg);
+                }
             } catch (IOException e) {
+                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
                 throw new RuntimeException(e);
-            }
-
-            if (inboundMsg.equals("&switch")) {     // Case where client choosing another chat partner
-                receiversSocket = null;
-                receiversName = "";
-                continue;
-            }
-
-            System.out.println(inboundMsg);
-            String[] msg = inboundMsg.split("&nbsp");
-            if (msg.length == 1) {      // Case where client is sending only chat partners name.
-                receiversSocket = connectedClients.get(msg[0]);
-                receiversName = msg[0];
-                try {
-                    loadChat(clientName, receiversName);
-                    String chatHistory = readChatFileToString(clientName, receiversName);
-                    System.out.println("Syncing Chat History with " + clientName);
-                    out.println("Server: Syncing Chat History.");
-                    out.println(chatHistory);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            if ((msg.length == 3) && !receiversName.isEmpty()) {      // Case where client is message to chat partner.
-                try {
-                    saveChatLocally(clientName, receiversName, inboundMsg);
-                    saveChatLocally(receiversName, clientName, inboundMsg);
-                    if (receiversSocket != null) {  // Chat partner is online
-                        PrintWriter outToReceiver = new PrintWriter(receiversSocket.getOutputStream(), true);
-                        outToReceiver.println(inboundMsg);
-                    }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
             }
         }
     }
@@ -250,11 +269,58 @@ public class ChatServer extends Thread {
         ) {
             loadClients();
 
-            authenticateUser(in, out);
+            while (true) {
+                String inboundMsg = in.readLine();
+                if(inboundMsg == null){
+                    continue;
+                }
 
-            broadcastClientList();
+                request = inboundMsg.split(DELIMITER);
+                if (request[0].equals("/logout")) {
+                    sessions.remove(Integer.parseInt(request[1]));
+                    response = ("200" + DELIMITER + request[0] + DELIMITER + "Server: User successfully logged out.");
+                    break;
+                }
 
-            rerouteInboundMessage(in, out);
+                if (request[0].equals("/users")) {
+                    response = ("200" + DELIMITER + request[0] + DELIMITER + getClientNames());
+                }
+
+                if (request[0].equals("/signup")) {
+                    userSignup();
+                }
+
+                if (request[0].equals("/login")) {
+                    userLogin();
+                }
+
+                if (request[0].equals("/syncChatHistory")) {
+                    String userName = parseSessionIDToUserName();
+                    if (userName != null) {
+                        syncChatHistory(userName);
+                    }
+                }
+
+
+                if (request[0].equals("/message")) {
+                    String userName = parseSessionIDToUserName();
+                    if (userName != null) {
+                        rerouteInboundMessage(userName);
+                    }
+                }
+
+                if (request[0].equals("/broadcast") || request[0].equals("/broadcastUserList")) {
+                    String userName = parseSessionIDToUserName();
+                    if (userName != null) {
+                        broadcast(userName);
+                    }
+                }
+
+                if (!response.isEmpty()) {
+                    out.println(response);
+                    response = "";
+                }
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -265,11 +331,11 @@ public class ChatServer extends Thread {
             throw new RuntimeException(e);
         } finally {
             numberOfActiveConnections.decrementAndGet();
-            System.out.println("Terminating connection with " + clientName);
+            System.out.println("Terminating connection.");
         }
     }
 
-    public static void main(String[] args) throws InterruptedException, IOException {
+    public static void main(String[] args) throws IOException {
         System.out.print("\033[H\033[2J");      // Clears output terminal
         while (ChatServer.numberOfActiveConnections.getPlain() < 100) {
             System.out.println("Waiting for a new client to connect with server.");
