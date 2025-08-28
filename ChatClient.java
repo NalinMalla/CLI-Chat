@@ -383,7 +383,7 @@ public class ChatClient {
                     }
 
                     if (inboundMsg[0].equals("200") && inboundMsg[1].equals("/message") && chatHistory != null && inboundMsg[2].equals(sendTo)) {
-                        chatHistory.add(inboundMsg[2]);
+                        chatHistory.add(inboundMsg[2] + DELIMITER + inboundMsg[3] + DELIMITER + inboundMsg[4]);
                         displayChat();
                         continue;
                     }

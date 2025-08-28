@@ -219,7 +219,7 @@ public class ChatServer extends Thread {
             ) {
                 saveChatLocally(sendersName, receiversName, outboundMsg);
                 saveChatLocally(receiversName, sendersName, outboundMsg);
-                outToReceiver.println(request[0] + DELIMITER + outboundMsg);
+                outToReceiver.println("200" + DELIMITER + request[0] + DELIMITER + outboundMsg);
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
                 throw new RuntimeException(e);
@@ -235,7 +235,7 @@ public class ChatServer extends Thread {
             try (PrintWriter out = new PrintWriter(receiversSocket.getOutputStream(), true)
             ) {
                 String outboundMsg = "";
-                if(request[0].equals("/broadcast")){
+                if (request[0].equals("/broadcast")) {
                     String timestamp = request[2];
                     String msg = request[3];
                     outboundMsg = (request[0] + DELIMITER + sendersName + DELIMITER + timestamp + DELIMITER + msg);
@@ -243,12 +243,12 @@ public class ChatServer extends Thread {
                     saveChatLocally(receiversName, sendersName, outboundMsg);
                 }
 
-                if(request[0].equals("/broadcastUserList")){
+                if (request[0].equals("/broadcastUserList")) {
                     outboundMsg = (request[0] + DELIMITER + getClientNames());
                 }
 
-                if(!outboundMsg.isEmpty()){
-                    out.println("200"+ DELIMITER + outboundMsg);
+                if (!outboundMsg.isEmpty()) {
+                    out.println("200" + DELIMITER + outboundMsg);
                 }
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
@@ -271,7 +271,7 @@ public class ChatServer extends Thread {
 
             while (true) {
                 String inboundMsg = in.readLine();
-                if(inboundMsg == null){
+                if (inboundMsg == null) {
                     continue;
                 }
 
