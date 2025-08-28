@@ -301,7 +301,6 @@ public class ChatServer extends Thread {
                     }
                 }
 
-
                 if (request[0].equals("/message")) {
                     String userName = parseSessionIDToUserName();
                     if (userName != null) {
