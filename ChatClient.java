@@ -70,11 +70,17 @@ public class ChatClient {
     }
 
     public ArrayList<String> parseChatHistory(String content) {
-        if (content == null || content.isEmpty()) return new ArrayList<>();
+        ArrayList<String> parsedChatHistory = new ArrayList<>();
 
-        // Split using line separator regex to handle different OS formats
-        String[] lines = content.split("\\R"); // \R matches any line break (Unix, Windows, Mac)
-        return new ArrayList<>(Arrays.asList(lines));
+        if (content != null && !content.isEmpty()) {
+            String[] lines = content.split("&n");
+            for (String line : lines) {
+                String parsedLine = String.join(DELIMITER, line.split("&b"));
+                parsedChatHistory.add(parsedLine);
+            }
+        }
+
+        return parsedChatHistory;
     }
 
     void credentialValidation() {
@@ -128,7 +134,7 @@ public class ChatClient {
         System.out.println("DASHBOARD");
         System.out.println("---------");
         if (clientList == null) {
-            System.out.println("Client List is currently empty.\nPlease wait for another client to connect with the server.");
+            System.out.println("Trying to connect with server.");
         } else {
             if (outboundMsg.equals("&switch") || sendTo.isEmpty()) {
                 System.out.println("Client List:");
@@ -186,6 +192,7 @@ public class ChatClient {
                 }
 
                 if (inboundMsg[1].equals("/login")) {
+                    System.out.println("Setting sessionID");
                     sessionID = inboundMsg[2];
                     out.println("/broadcastUserList" + DELIMITER + sessionID);
                     currentMode = MODE.DASHBOARD;
@@ -212,7 +219,7 @@ public class ChatClient {
             }
         }
 
-        synchronized void getUserCredentials(PrintWriter out) {
+        synchronized void sendUserCredentials(PrintWriter out) {
             if (userName.isEmpty()) {
                 System.out.print("Username: ");
                 userName = sc.nextLine();
@@ -236,7 +243,7 @@ public class ChatClient {
             if (inboundMsg != null && (inboundMsg[1].equals("/login") || inboundMsg[1].equals("/signup"))) {
                 authenticateUser(out);
             }
-            getUserCredentials(out);
+            sendUserCredentials(out);
         }
 
         synchronized void handleDashboardOutput(PrintWriter out) {
@@ -253,14 +260,13 @@ public class ChatClient {
 
             if (!sendTo.isEmpty()) {
                 if (clientInList()) {
-                    System.out.println("You are about enter into a chat room with " + sendTo + ".");
                     out.println("/syncChatHistory" + DELIMITER + sessionID + DELIMITER + sendTo);
 
-                    while (!inboundMsg[1].equals("syncChatHistory")) {
-                    }
-
+//                    while (!inboundMsg[1].equals("/syncChatHistory")) {
+//                    }
                     if (inboundMsg[0].charAt(0) == '2') {
                         currentMode = MODE.CHAT;
+                        System.out.println("You are about enter into a chat room with " + sendTo + ".");
                     }
                 } else {
                     System.out.println("Client not found in list.");
@@ -281,9 +287,9 @@ public class ChatClient {
             }
 
             if (!outboundMsg.equals("&exit") && !outboundMsg.equals("&switch") && chatHistory != null) {
-                outboundMsg = sendTo + DELIMITER + getCurrentDateTime() + DELIMITER + outboundMsg;
-                out.println("/message" + DELIMITER + sessionID + DELIMITER + outboundMsg);
-                chatHistory.add(outboundMsg);
+                outboundMsg = getCurrentDateTime() + DELIMITER + outboundMsg;
+                out.println("/message" + DELIMITER + sessionID + DELIMITER + sendTo + DELIMITER + outboundMsg);
+                chatHistory.add(userName + DELIMITER + outboundMsg);
                 outboundMsg = "";
             }
         }
@@ -334,7 +340,7 @@ public class ChatClient {
                     }
                     inboundMsg = null;
                 }
-
+                System.out.println("Exiting sendOutbound");
                 if (!sessionID.isEmpty()) {       // outboundMsg == "&exit"
                     out.println("/logout" + DELIMITER + sessionID);
                 }
@@ -378,7 +384,10 @@ public class ChatClient {
                     }
 
                     if (inboundMsg[0].equals("200") && inboundMsg[1].equals("/syncChatHistory")) {
-                        chatHistory = parseChatHistory(inboundMsg[2]);
+                        chatHistory = new ArrayList<String>();
+                        if (inboundMsg.length > 2) {
+                            chatHistory = parseChatHistory(inboundMsg[2]);
+                        }
                         continue;
                     }
 
@@ -390,6 +399,7 @@ public class ChatClient {
 
 //                    System.arraycopy(inboundMsg, 0, serverMsg, 0, inboundMsg.length);
                 }
+                System.out.println("Exiting receiveInbound");
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

@@ -31,7 +31,7 @@ public class ChatServer extends Thread {
         this.clientSocket = clientSocket;
     }
 
-    String getClientNames() {
+    synchronized String getClientNames() {
         StringBuilder clientInfo = new StringBuilder();
         for (String address : clientCredentials.keySet()) {
             if (connectedClients.containsKey(address)) {
@@ -63,7 +63,7 @@ public class ChatServer extends Thread {
         return f;
     }
 
-    void saveClientLocally(String userName, String userPassword) {
+    synchronized void saveClientLocally(String userName, String userPassword) {
         File f = getClientFile();
         try (FileWriter fWrite = new FileWriter(f, true)) {
             fWrite.write(userName + DELIMITER + userPassword + System.lineSeparator());
@@ -73,7 +73,7 @@ public class ChatServer extends Thread {
         }
     }
 
-    void loadClients() {
+    synchronized void loadClients() {
         File f = getClientFile();
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
             clientCredentials = new ConcurrentHashMap<>();
@@ -107,7 +107,7 @@ public class ChatServer extends Thread {
         return f;
     }
 
-    void saveChatLocally(String clientName, String chatPartner, String inboundMsg) {
+    synchronized void saveChatLocally(String clientName, String chatPartner, String inboundMsg) {
         File f = getChatFile(clientName, chatPartner);
         if (!inboundMsg.isEmpty()) {
             try (FileWriter fWrite = new FileWriter(f, true)) {
@@ -119,28 +119,14 @@ public class ChatServer extends Thread {
         }
     }
 
-    ArrayList<String> loadChat(String clientName, String chatPartner) {
-        File f = getChatFile(clientName, chatPartner);
-        ArrayList<String> chatHistory = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                chatHistory.add(line);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return chatHistory;
-    }
-
-    public String readChatFileToString(String clientName, String chatPartner) {
+    synchronized String readChatFileToString(String clientName, String chatPartner) {
         File f = getChatFile(clientName, chatPartner);
         StringBuilder fileContent = new StringBuilder();
 
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                fileContent.append(line).append(System.lineSeparator());
+                fileContent.append(String.join("&b", line.split(DELIMITER))).append("&n");
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -155,7 +141,7 @@ public class ChatServer extends Thread {
         return sessionID;
     }
 
-    String parseSessionIDToUserName() {
+    synchronized String parseSessionIDToUserName() {
         int sessionID = Integer.parseInt(request[1]);
         String userName = sessions.get(sessionID);
         if (userName == null) {
@@ -164,7 +150,7 @@ public class ChatServer extends Thread {
         return userName;
     }
 
-    void userSignup() {
+    synchronized void userSignup() {
         String userName = request[1];
         String userPassword = request[2];
         if (clientCredentials.containsKey(userName)) {
@@ -179,7 +165,7 @@ public class ChatServer extends Thread {
         }
     }
 
-    void userLogin() {
+    synchronized void userLogin() {
         String userName = request[1];
         String userPassword = request[2];
         if (!clientCredentials.containsKey(userName)) {
@@ -202,23 +188,24 @@ public class ChatServer extends Thread {
         }
     }
 
-    void syncChatHistory(String sendersName) {
+    synchronized void syncChatHistory(String sendersName) {
         String chatHistory = readChatFileToString(sendersName, request[2]);
         response = ("200" + DELIMITER + request[0] + DELIMITER + chatHistory);
     }
 
-    void rerouteInboundMessage(String sendersName) {
+    synchronized void rerouteInboundMessage(String sendersName) {
         String receiversName = request[2];
         String timestamp = request[3];
         String msg = request[4];
         Socket receiversSocket = connectedClients.get(receiversName);
         String outboundMsg = sendersName + DELIMITER + timestamp + DELIMITER + msg;
 
+        saveChatLocally(sendersName, receiversName, outboundMsg);
+        saveChatLocally(receiversName, sendersName, outboundMsg);
+
         if (receiversSocket != null) {  // Chat partner is online
-            try (PrintWriter outToReceiver = new PrintWriter(receiversSocket.getOutputStream(), true)
-            ) {
-                saveChatLocally(sendersName, receiversName, outboundMsg);
-                saveChatLocally(receiversName, sendersName, outboundMsg);
+            try {
+                PrintWriter outToReceiver = new PrintWriter(receiversSocket.getOutputStream(), true);
                 outToReceiver.println("200" + DELIMITER + request[0] + DELIMITER + outboundMsg);
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
@@ -227,13 +214,15 @@ public class ChatServer extends Thread {
         }
     }
 
-    void broadcast(String sendersName) {
+    synchronized void broadcast(String sendersName) {
         for (Map.Entry<String, Socket> entry : connectedClients.entrySet()) {
             String receiversName = entry.getKey();
             Socket receiversSocket = entry.getValue();
+            PrintWriter receiversOut;
 
-            try (PrintWriter out = new PrintWriter(receiversSocket.getOutputStream(), true)
-            ) {
+            // Here, we aren't using try block to close the PrintWriter after task completion because that will lead to premature closure of all sockets.
+            try {
+                receiversOut = new PrintWriter(receiversSocket.getOutputStream(), true);
                 String outboundMsg = "";
                 if (request[0].equals("/broadcast")) {
                     String timestamp = request[2];
@@ -248,8 +237,9 @@ public class ChatServer extends Thread {
                 }
 
                 if (!outboundMsg.isEmpty()) {
-                    out.println("200" + DELIMITER + outboundMsg);
+                    receiversOut.println("200" + DELIMITER + outboundMsg);
                 }
+                System.out.println("broadcasted.");
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
                 throw new RuntimeException(e);
@@ -257,9 +247,8 @@ public class ChatServer extends Thread {
         }
     }
 
-
     @Override
-    public void run() {
+    synchronized public void run() {
         System.out.println("New connection established.");
         numberOfActiveConnections.incrementAndGet();
 
@@ -316,16 +305,11 @@ public class ChatServer extends Thread {
                 }
 
                 if (!response.isEmpty()) {
+                    System.out.println("Sending response: " + response);
                     out.println(response);
                     response = "";
                 }
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
-        try {
-            clientSocket.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         } finally {
