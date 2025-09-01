@@ -5,11 +5,11 @@ import java.net.Socket;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class ChatClient {
+public class ChatClient extends Thread {
+    final static int RECONNECT_THRESHOLD = 256;
     final static String DELIMITER = ";";
     String userName = "";
     String userPassword = "";
@@ -22,6 +22,12 @@ public class ChatClient {
     ArrayList<String> chatHistory = null;
     AtomicInteger newlyDetectedClients;
     Scanner sc;
+    int sleepDuration = 1;
+
+    enum CHAT_STATE {ACTIVE, CONNECTED, DISCONNECTED, TERMINATED}
+
+    ;
+    CHAT_STATE currentChatState;
 
     enum MODE {LOGIN, SIGNUP, DASHBOARD, CHAT}
 
@@ -31,31 +37,33 @@ public class ChatClient {
     ChatClient() {
         sc = new Scanner(System.in);
         this.newlyDetectedClients = new AtomicInteger();
+        this.currentChatState = CHAT_STATE.ACTIVE;
 //        this.serverMsg = new String[]{"","",""};     // Required to copy inboundMsg to serverMsg for the first time
     }
 
     boolean isCurrentModeInitialized() {
-        char loginMode = 'c';
-        while (loginMode == 'c') {
+        String loginMode = "c";
+        while (loginMode.equals("c")) {
             clearDisplay();
-            System.out.print("Do you wish to: \na) Login to you exiting account.\nb) Create a new account. \nInput either a or b to continue and x to exit. \n>:");
-            loginMode = sc.nextLine().charAt(0);
+            System.out.print("Do you wish to: \na) Login to you exiting account.\nb) Create a new account. \nInput either a or b to continue and '&exit' to exit. \n>:");
+            loginMode = sc.nextLine();
             switch (loginMode) {
-                case 'a':
+                case "a":
                     this.currentMode = MODE.LOGIN;
                     displayUserAuthentication();
                     break;
 
-                case 'b':
+                case "b":
                     this.currentMode = MODE.SIGNUP;
                     displayUserAuthentication();
                     break;
 
-                case 'x':
+                case "&exit":
+                    this.currentChatState = CHAT_STATE.TERMINATED;
                     return false;
 
                 default:
-                    loginMode = 'c';
+                    loginMode = "c";
             }
         }
 
@@ -131,10 +139,11 @@ public class ChatClient {
 
     synchronized void displayDashboard() {
         clearDisplay();
+        System.out.println(currentChatState);
         System.out.println("DASHBOARD");
         System.out.println("---------");
         if (clientList == null) {
-            System.out.println("Trying to connect with server.");
+            System.out.println("Trying to get client list from Server.");
         } else {
             if (outboundMsg.equals("&switch") || sendTo.isEmpty()) {
                 System.out.println("Client List:");
@@ -248,13 +257,14 @@ public class ChatClient {
 
         synchronized void handleDashboardOutput(PrintWriter out) {
             sendTo = sc.nextLine();
+
             clearDisplay();
             if (sendTo.isEmpty()) {
                 System.out.println("No input for client address was given.");
             }
 
             if (sendTo.equals("&exit")) {
-                outboundMsg = "&exit";
+                currentChatState = CHAT_STATE.TERMINATED;
                 sendTo = "";
             }
 
@@ -279,8 +289,11 @@ public class ChatClient {
 
         synchronized void handleChatOutput(PrintWriter out) {
             outboundMsg = sc.nextLine();
+            if (outboundMsg.equals("&exit")) {
+                currentChatState = CHAT_STATE.TERMINATED;
+            }
+
             if (!outboundMsg.equals("&exit") && outboundMsg.equals("&switch")) {
-                out.println(outboundMsg);
                 sendTo = "";
                 chatHistory = null;
                 currentMode = MODE.DASHBOARD;
@@ -299,7 +312,7 @@ public class ChatClient {
             try (
                     PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             ) {
-                while (!outboundMsg.equals("&exit")) {
+                while (currentChatState != CHAT_STATE.TERMINATED && currentChatState != CHAT_STATE.DISCONNECTED) {
                     if (currentMode == MODE.SIGNUP || currentMode == MODE.LOGIN) {
                         if (sessionID.isEmpty()) {
                             displayUserAuthentication();
@@ -345,7 +358,8 @@ public class ChatClient {
                     out.println("/logout" + DELIMITER + sessionID);
                 }
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                currentChatState = CHAT_STATE.DISCONNECTED;
+                System.out.println("Client disconnected from server.\n" + e);
             }
         }
     }
@@ -357,13 +371,12 @@ public class ChatClient {
             this.clientSocket = clientSocket;
         }
 
-
         @Override
         public synchronized void run() {
             try (
                     BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             ) {
-                while (!outboundMsg.equals("&exit")) {
+                while (currentChatState != CHAT_STATE.TERMINATED && currentChatState != CHAT_STATE.DISCONNECTED) {
                     try {
                         String response = in.readLine();
                         if (response == null || response.isEmpty()) {
@@ -371,7 +384,9 @@ public class ChatClient {
                         }
                         inboundMsg = response.split(DELIMITER);
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        currentChatState = CHAT_STATE.DISCONNECTED;
+                        System.out.println("Client disconnected from server.\n" + e);
+                        break;
                     }
 
                     if (inboundMsg[0].equals("200") && inboundMsg[1].equals("/broadcastUserList")) {
@@ -401,7 +416,8 @@ public class ChatClient {
                 }
                 System.out.println("Exiting receiveInbound");
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                currentChatState = CHAT_STATE.DISCONNECTED;
+                System.out.println("Client disconnected from server.\n" + e);
             }
         }
     }
@@ -414,6 +430,9 @@ public class ChatClient {
             try (
                     Socket clientSocket = new Socket("127.0.0.1", 1234);
             ) {
+                currentChatState = CHAT_STATE.CONNECTED;
+                sleepDuration = 1;
+
                 inbound = new ReceiveInboundMsg(clientSocket);
                 outbound = new SendOutboundMsg(clientSocket);
 
@@ -423,17 +442,48 @@ public class ChatClient {
                 inbound.join();
                 outbound.join();
             } catch (IOException | InterruptedException e) {
-                throw new RuntimeException(e);
-            } finally {
-                System.out.println("Deactivating client " + userName + "\n");
+                currentChatState = CHAT_STATE.DISCONNECTED;
+                System.out.println("Client disconnected from server.\n" + e);
             }
         } else {
-            System.out.println("Exiting Program.");
+            currentChatState = CHAT_STATE.TERMINATED;
         }
     }
 
     public static void main(String[] args) {
         ChatClient client = new ChatClient();
-        client.activateChat();
+        while (client.currentChatState != CHAT_STATE.TERMINATED) {
+            if (client.sleepDuration >= 256) {
+                break;
+            }
+
+            client.activateChat();
+
+            System.out.println(client.currentChatState);
+
+            while (client.currentChatState == CHAT_STATE.CONNECTED) {
+            }
+
+
+            if (client.currentChatState == CHAT_STATE.TERMINATED) {
+                break;
+            }
+
+            try {
+                for (int i = client.sleepDuration; i > 0; i--) {
+                    client.clearDisplay();
+                    if (i > client.sleepDuration - 2) {
+                        System.out.println("ERROR: Couldn't connect with Server.");
+                    }
+                    System.out.println("Waiting for " + i + " seconds before reconnecting.");
+                    Thread.sleep(1000);
+                }
+                client.sleepDuration *= 2;
+            } catch (InterruptedException e) {
+                System.out.println(e);
+            }
+        }
+
+        System.out.println("Exiting Program.");
     }
 }

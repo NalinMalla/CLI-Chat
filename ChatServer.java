@@ -135,7 +135,7 @@ public class ChatServer extends Thread {
         return fileContent.toString();
     }
 
-    int generateSessionID(String clientName) {
+    int generateSessionID() {
         SecureRandom secureRandom = new SecureRandom();
         int sessionID = secureRandom.nextInt(1000);  // Here, secureRandom was used instead of rand because its output is unpredictable even if an attacker knows part of the system as it pulls entropy from secure system sources.
         return sessionID;
@@ -173,7 +173,7 @@ public class ChatServer extends Thread {
         }
 
         if (clientCredentials.containsKey(userName) && clientCredentials.get(userName).equals(userPassword)) {
-            int sessionID = generateSessionID(userName);
+            int sessionID = generateSessionID();
             sessions.put(sessionID, userName);      // cannot replace sessionID as it will render obsolete the ones being used in other devices without notification.
             response = ("200" + DELIMITER + "/login" + DELIMITER + sessionID);
             if (connectedClients.containsKey(userName)) {
@@ -239,7 +239,6 @@ public class ChatServer extends Thread {
                 if (!outboundMsg.isEmpty()) {
                     receiversOut.println("200" + DELIMITER + outboundMsg);
                 }
-                System.out.println("broadcasted.");
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
                 throw new RuntimeException(e);
@@ -305,7 +304,6 @@ public class ChatServer extends Thread {
                 }
 
                 if (!response.isEmpty()) {
-                    System.out.println("Sending response: " + response);
                     out.println(response);
                     response = "";
                 }
