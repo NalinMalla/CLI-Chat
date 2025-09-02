@@ -3,6 +3,8 @@ package Socket_Programming.CLI_Chat;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,6 +33,12 @@ public class ChatServer extends Thread {
         this.clientSocket = clientSocket;
     }
 
+    String getCurrentDateTime() {
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        return now.format(formatter);
+    }
+
     synchronized String getClientNames() {
         StringBuilder clientInfo = new StringBuilder();
         for (String address : clientCredentials.keySet()) {
@@ -44,19 +52,18 @@ public class ChatServer extends Thread {
         return clientInfo.toString();
     }
 
-    File getClientFile() {
+    File getFile(String fileName) {
         File dir = new File("Chat_Files");
         if (!dir.exists()) {
             dir.mkdirs();
         }
 
-        File f = new File(dir, "ClientList.txt");
+        File f = new File(dir, fileName);
         if (!f.exists()) {
             try {
                 f.createNewFile();
             } catch (IOException e) {
-                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not create client list file.");
-                throw new RuntimeException(e);
+                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not create " + fileName + " file.");
             }
         }
 
@@ -64,17 +71,16 @@ public class ChatServer extends Thread {
     }
 
     synchronized void saveClientLocally(String userName, String userPassword) {
-        File f = getClientFile();
+        File f = getFile("ClientList.txt");
         try (FileWriter fWrite = new FileWriter(f, true)) {
             fWrite.write(userName + DELIMITER + userPassword + System.lineSeparator());
         } catch (IOException e) {
             response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not update client list file.");
-            throw new RuntimeException(e);
         }
     }
 
     synchronized void loadClients() {
-        File f = getClientFile();
+        File f = getFile("ClientList.txt");
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
             clientCredentials = new ConcurrentHashMap<>();
             String line;
@@ -85,7 +91,43 @@ public class ChatServer extends Thread {
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not load the client list file.");
+        }
+    }
+
+    synchronized void saveSession(Integer sessionID, String userName) {
+        File f = getFile("Sessions.txt");
+        try (FileWriter fWrite = new FileWriter(f, true)) {
+            fWrite.write(sessionID.toString() + DELIMITER + userName + System.lineSeparator());
+        } catch (IOException e) {
+            response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not update sessions file.");
+        }
+    }
+
+    synchronized void loadSessions() {
+        File f = getFile("Sessions.txt");
+        try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
+            sessions = new ConcurrentHashMap<>();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] sessionInfo = line.split(DELIMITER);
+                if (sessionInfo.length == 2) {
+                    sessions.put(Integer.parseInt(sessionInfo[0]), sessionInfo[1]);
+                }
+            }
+        } catch (IOException e) {
+            response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not load the sessions file.");
+        }
+    }
+
+    synchronized void removeTerminatedSessionsFromFile() {
+        File f = getFile("Sessions.txt");
+        try (FileWriter fWrite = new FileWriter(f, false)) {
+            for (Integer sessionID : sessions.keySet()) {
+                fWrite.write(sessionID.toString() + DELIMITER + sessions.get(sessionID) + System.lineSeparator());
+            }
+        } catch (IOException e) {
+            response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not rewrite sessions file to remove terminated session.");
         }
     }
 
@@ -100,7 +142,7 @@ public class ChatServer extends Thread {
             try {
                 f.createNewFile();
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not create the chat file.");
             }
         }
 
@@ -114,7 +156,6 @@ public class ChatServer extends Thread {
                 fWrite.write(inboundMsg + System.lineSeparator());
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not update chat history in file.");
-                throw new RuntimeException(e);
             }
         }
     }
@@ -129,7 +170,7 @@ public class ChatServer extends Thread {
                 fileContent.append(String.join("&b", line.split(DELIMITER))).append("&n");
             }
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not create read chat file to string.");
         }
 
         return fileContent.toString();
@@ -174,6 +215,7 @@ public class ChatServer extends Thread {
 
         if (clientCredentials.containsKey(userName) && clientCredentials.get(userName).equals(userPassword)) {
             int sessionID = generateSessionID();
+            saveSession(sessionID, userName);
             sessions.put(sessionID, userName);      // cannot replace sessionID as it will render obsolete the ones being used in other devices without notification.
             response = ("200" + DELIMITER + "/login" + DELIMITER + sessionID);
             if (connectedClients.containsKey(userName)) {
@@ -212,6 +254,8 @@ public class ChatServer extends Thread {
                 throw new RuntimeException(e);
             }
         }
+
+        response = ("200" + DELIMITER + request[0]);
     }
 
     synchronized void broadcast(String sendersName) {
@@ -241,7 +285,6 @@ public class ChatServer extends Thread {
                 }
             } catch (IOException e) {
                 response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Unknown Server Side Error");
-                throw new RuntimeException(e);
             }
         }
     }
@@ -256,6 +299,7 @@ public class ChatServer extends Thread {
                 PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
         ) {
             loadClients();
+            loadSessions();
 
             while (true) {
                 String inboundMsg = in.readLine();
@@ -267,6 +311,7 @@ public class ChatServer extends Thread {
                 if (request[0].equals("/logout")) {
                     sessions.remove(Integer.parseInt(request[1]));
                     response = ("200" + DELIMITER + request[0] + DELIMITER + "Server: User successfully logged out.");
+                    removeTerminatedSessionsFromFile();
                     break;
                 }
 
@@ -305,6 +350,7 @@ public class ChatServer extends Thread {
 
                 if (!response.isEmpty()) {
                     out.println(response);
+                    System.out.println(response);
                     response = "";
                 }
             }
