@@ -168,7 +168,7 @@ public class ChatClient extends Thread {
                 if (inboundMsg[1].equals("/signup")) {
                     clearDisplay();
                     System.out.println(inboundMsg[2]);
-                    System.out.println("Try logging into this existing account.");
+                    System.out.println("Try logging into this account.");
                     System.out.println("Press enter to return to the main menu.");
                     sc.nextLine();
                     currentMode = MODE.LOGIN;
@@ -176,7 +176,6 @@ public class ChatClient extends Thread {
                 }
 
                 if (inboundMsg[1].equals("/login")) {
-                    System.out.println("Setting sessionID");
                     sessionID = inboundMsg[2];
                     out.println("/broadcastUserList" + DELIMITER + sessionID);
                     currentMode = MODE.DASHBOARD;
@@ -243,29 +242,29 @@ public class ChatClient extends Thread {
         }
 
         synchronized void handleUserAuthentication(PrintWriter out) {
-            getUserCredentials();
+            if (userName.isEmpty() || userPassword.isEmpty()) {
+                getUserCredentials();
+            }
             credentialValidation();
             if (userName.isEmpty() || userPassword.isEmpty()) return;
             sendUserCredentials(out);
 
-            while (inboundMsg == null) {
-                clearDisplay();
-                System.out.println("Waiting for servers response to users authentication request.");
-            }
-
-            if (inboundMsg[1].equals("/login") || inboundMsg[1].equals("/signup")) {
+            if (inboundMsg != null && (inboundMsg[1].equals("/login") || inboundMsg[1].equals("/signup"))) {
                 authenticateUser(out);
             }
         }
 
         synchronized void handleDashboardOutput(PrintWriter out) {
-            if (sendTo.isEmpty()) {      // outboundMsg is not cleared only if server is suddenly disconnected.
+            clearDisplay();
+
+            if (sendTo.isEmpty()) {
                 sendTo = sc.nextLine();
             }
 
-            clearDisplay();
-            if (sendTo.isEmpty()) {
+            if (sendTo.trim().isEmpty()) {
                 System.out.println("No input for client address was given.");
+                System.out.println("Press Enter to continue.");
+                sc.nextLine();
             }
 
             if (sendTo.equals("&exit")) {
@@ -273,23 +272,23 @@ public class ChatClient extends Thread {
                 sendTo = "";
             }
 
-            if (!sendTo.isEmpty()) {
-                if (clientInList()) {
-                    out.println("/syncChatHistory" + DELIMITER + sessionID + DELIMITER + sendTo);
-
-//                    while (!inboundMsg[1].equals("/syncChatHistory")) {
-//                    }
-                    if (inboundMsg[0].charAt(0) == '2') {
-                        currentMode = MODE.CHAT;
-                        System.out.println("You are about enter into a chat room with " + sendTo + ".");
-                    }
-                } else {
-                    System.out.println("Client not found in list.");
-                    sendTo = "";
-                }
+            if (!sendTo.isEmpty() && !clientInList()) {
+                System.out.println("Client not found in list.");
+                sendTo = "";
+                System.out.println("Press Enter to continue.");
+                sc.nextLine();
             }
-            System.out.println("Press Enter to continue.");
-            sc.nextLine();
+
+            if (!sendTo.isEmpty() && clientInList()) {
+                out.println("/syncChatHistory" + DELIMITER + sessionID + DELIMITER + sendTo);
+            }
+
+            if (inboundMsg != null && inboundMsg[0].charAt(0) == '2' && inboundMsg[1].equals("/syncChatHistory")) {
+                currentMode = MODE.CHAT;
+                System.out.println("You are about enter into a chat room with " + sendTo + ".");
+                System.out.println("Press Enter to continue.");
+                sc.nextLine();
+            }
         }
 
         synchronized void handleChatOutput(PrintWriter out) {
@@ -299,21 +298,21 @@ public class ChatClient extends Thread {
 
             if (outboundMsg.equals("&exit")) {
                 currentChatState = CHAT_STATE.TERMINATED;
+                outboundMsg = "";
             }
 
-            if (!outboundMsg.equals("&exit") && outboundMsg.equals("&switch")) {
-                sendTo = "";
-                chatHistory = null;
+            if (outboundMsg.equals("&switch")) {
                 currentMode = MODE.DASHBOARD;
+                chatHistory = null;
+                sendTo = "";
+                outboundMsg = "";
             }
 
-            if (!outboundMsg.isEmpty() && !outboundMsg.equals("&exit") && !outboundMsg.equals("&switch") && chatHistory != null) {
-                outboundMsg = getCurrentDateTime() + DELIMITER + outboundMsg;
-                out.println("/message" + DELIMITER + sessionID + DELIMITER + sendTo + DELIMITER + outboundMsg);
-
+            if (!outboundMsg.isEmpty() && chatHistory != null) {
                 if (inboundMsg != null && inboundMsg[0].equals("200") && inboundMsg[1].equals("/message")) {
                     chatHistory.add(userName + DELIMITER + outboundMsg);
                     outboundMsg = "";
+                    return;
                 }
 
                 if (inboundMsg != null && !inboundMsg[0].equals("200") && inboundMsg[1].equals("/message")) {
@@ -322,7 +321,12 @@ public class ChatClient extends Thread {
                     System.out.println(inboundMsg[2]);
                     System.out.println("Press Enter to continue.");
                     sc.nextLine();
+                    outboundMsg = "";
+                    return;
                 }
+
+                outboundMsg = getCurrentDateTime() + DELIMITER + outboundMsg;
+                out.println("/message" + DELIMITER + sessionID + DELIMITER + sendTo + DELIMITER + outboundMsg);
             }
 
         }
@@ -370,10 +374,12 @@ public class ChatClient extends Thread {
                         displayChat();
                         handleChatOutput(out);
                     }
+
                     inboundMsg = null;
                 }
                 if (!sessionID.isEmpty()) {       // outboundMsg == "&exit"
                     out.println("/logout" + DELIMITER + sessionID);
+                    sessionID = "";
                 }
             } catch (IOException e) {
                 currentChatState = CHAT_STATE.DISCONNECTED;
@@ -464,7 +470,7 @@ public class ChatClient extends Thread {
     public static void main(String[] args) {
         ChatClient client = new ChatClient();
         while (client.currentChatState != CHAT_STATE.TERMINATED) {
-            if (client.sleepDuration >= 256) {
+            if (client.sleepDuration >= RECONNECT_THRESHOLD) {
                 break;
             }
 
