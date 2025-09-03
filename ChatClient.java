@@ -116,7 +116,6 @@ public class ChatClient extends Thread {
 
     synchronized void displayDashboard() {
         clearDisplay();
-        System.out.println(currentChatState);
         System.out.println("DASHBOARD");
         System.out.println("---------");
         if (clientList == null) {
@@ -132,7 +131,7 @@ public class ChatClient extends Thread {
                         System.out.println("" + (i + 1) + ") " + client[0] + " (" + client[1] + ")");
                     }
                 }
-                System.out.print("\nWhich client will you like to chat with? \n>:");
+                System.out.print("\nInput '&exit' to terminate this program.\n\nWhich client will you like to chat with?\n>:");
             }
         }
     }
@@ -310,7 +309,7 @@ public class ChatClient extends Thread {
 
             if (!outboundMsg.isEmpty() && chatHistory != null) {
                 if (inboundMsg != null && inboundMsg[0].equals("200") && inboundMsg[1].equals("/message")) {
-                    chatHistory.add(userName + DELIMITER + outboundMsg);
+                    chatHistory.add(userName + DELIMITER + getCurrentDateTime() + DELIMITER + outboundMsg);
                     outboundMsg = "";
                     return;
                 }
@@ -325,8 +324,7 @@ public class ChatClient extends Thread {
                     return;
                 }
 
-                outboundMsg = getCurrentDateTime() + DELIMITER + outboundMsg;
-                out.println("/message" + DELIMITER + sessionID + DELIMITER + sendTo + DELIMITER + outboundMsg);
+                out.println("/message" + DELIMITER + sessionID + DELIMITER + sendTo + DELIMITER + getCurrentDateTime() + DELIMITER + outboundMsg);
             }
 
         }
@@ -382,7 +380,9 @@ public class ChatClient extends Thread {
                     sessionID = "";
                 }
             } catch (IOException e) {
-                currentChatState = CHAT_STATE.DISCONNECTED;
+                if (currentChatState != CHAT_STATE.TERMINATED) {
+                    currentChatState = CHAT_STATE.DISCONNECTED;
+                }
             }
         }
     }
@@ -407,7 +407,9 @@ public class ChatClient extends Thread {
                         }
                         inboundMsg = response.split(DELIMITER);
                     } catch (IOException e) {
-                        currentChatState = CHAT_STATE.DISCONNECTED;
+                        if (currentChatState != CHAT_STATE.TERMINATED) {        // Necessary because another thread might update its value after the loop condition is passed.
+                            currentChatState = CHAT_STATE.DISCONNECTED;
+                        }
                         break;
                     }
 
@@ -434,7 +436,9 @@ public class ChatClient extends Thread {
                     }
                 }
             } catch (IOException e) {
-                currentChatState = CHAT_STATE.DISCONNECTED;
+                if (currentChatState != CHAT_STATE.TERMINATED) {
+                    currentChatState = CHAT_STATE.DISCONNECTED;
+                }
             }
         }
     }
@@ -450,16 +454,18 @@ public class ChatClient extends Thread {
                 currentChatState = CHAT_STATE.CONNECTED;
                 sleepDuration = 1;
 
-                inbound = new ReceiveInboundMsg(clientSocket);
                 outbound = new SendOutboundMsg(clientSocket);
+                inbound = new ReceiveInboundMsg(clientSocket);
 
-                inbound.start();
                 outbound.start();
+                inbound.start();
 
-                inbound.join();
                 outbound.join();
+                inbound.join();
             } catch (IOException | InterruptedException e) {
-                currentChatState = CHAT_STATE.DISCONNECTED;
+                if (currentChatState != CHAT_STATE.TERMINATED) {
+                    currentChatState = CHAT_STATE.DISCONNECTED;
+                }
                 System.out.println("Client disconnected from server.\n" + e);
             }
         } else {
@@ -491,9 +497,6 @@ public class ChatClient extends Thread {
             }
 
             client.activateChat();
-
-            System.out.println(client.currentChatState);
-
 //            while (client.currentChatState == CHAT_STATE.CONNECTED) {
 //            }
         }
