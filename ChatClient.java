@@ -77,6 +77,24 @@ public class ChatClient extends Thread {
         return now.format(formatter);
     }
 
+    synchronized void unauthorizedErrorCheck() {
+        if (inboundMsg[0].equals("401")) {
+            userName = "";
+            userPassword = "";
+            sessionID = "";
+            sendTo = "";
+            chatHistory = null;
+            clearDisplay();
+            System.out.println(inboundMsg[2]);
+            System.out.println("Please login to your account again.");
+            System.out.println("Press Enter to continue.");
+            sc.nextLine();
+            inboundMsg = null;
+            currentMode = MODE.LOGIN;
+            displayUserAuthentication();
+        }
+    }
+
     synchronized void waitForInboundMsg(String command) {
         while (currentChatState == CHAT_STATE.CONNECTED && (inboundMsg == null || !inboundMsg[1].equals(command))) {
             clearDisplay();
@@ -302,6 +320,7 @@ public class ChatClient extends Thread {
 //                sc.nextLine();
             }
 
+            unauthorizedErrorCheck();
 
             if (inboundMsg != null && inboundMsg[0].charAt(0) == '2' && inboundMsg[1].equals("/syncChatHistory")) {
                 currentMode = MODE.CHAT;
@@ -334,6 +353,7 @@ public class ChatClient extends Thread {
                 waitForInboundMsg("/message");
 //                System.out.println(inboundMsg[0] + DELIMITER + inboundMsg[1]);
 //                sc.nextLine();
+                unauthorizedErrorCheck();
 
                 if (inboundMsg != null && inboundMsg[0].equals("200") && inboundMsg[1].equals("/message")) {
                     chatHistory.add(userName + DELIMITER + getCurrentDateTime() + DELIMITER + outboundMsg);
@@ -400,7 +420,7 @@ public class ChatClient extends Thread {
                 }
                 if (!sessionID.isEmpty()) {       // outboundMsg == "&exit"
                     out.println("/logout" + DELIMITER + sessionID);
-                    sessionID = "";
+//                    sessionID = "";
                 }
             } catch (IOException e) {
                 if (currentChatState != CHAT_STATE.TERMINATED) {

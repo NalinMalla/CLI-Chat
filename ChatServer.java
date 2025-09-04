@@ -183,8 +183,13 @@ public class ChatServer extends Thread {
     }
 
     synchronized String parseSessionIDToUserName() {
-        int sessionID = Integer.parseInt(request[1]);
-        String userName = sessions.get(sessionID);
+        String userName = null;
+
+        if (!request[1].isEmpty()) {
+            int sessionID = Integer.parseInt(request[1]);
+            userName = sessions.get(sessionID);
+        }
+
         if (userName == null) {
             response = ("401" + DELIMITER + request[0] + DELIMITER + "Server: Unauthorized to send message due to invalid Session ID.");
         }
