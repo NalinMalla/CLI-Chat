@@ -306,7 +306,7 @@ public class ChatServer extends Thread {
                 if (inboundMsg == null) {
                     continue;
                 }
-                System.out.println(inboundMsg);
+                System.out.println("Request: " + inboundMsg);
 
                 request = inboundMsg.split(DELIMITER);
                 if (request[0].equals("/logout")) {
@@ -351,9 +351,11 @@ public class ChatServer extends Thread {
 
                 if (!response.isEmpty()) {
                     out.println(response);
-                    System.out.println(response);
+                    System.out.println("Response: " + response);
                     response = "";
                 }
+
+                System.out.println("Iteration Ended.");
             }
         } catch (IOException e) {
             System.out.println("ERROR: Connection with client unexpectedly broken.");
