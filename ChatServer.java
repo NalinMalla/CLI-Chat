@@ -20,6 +20,7 @@ public class ChatServer extends Thread {
     Socket clientSocket;
     String[] request;
     String response = "";
+    int msgCount = 0;
 
     static {
         try {
@@ -167,7 +168,9 @@ public class ChatServer extends Thread {
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                fileContent.append(String.join("&b", line.split(DELIMITER))).append("&n");
+                String[] msg = line.split(DELIMITER);
+                msgCount = Integer.parseInt(msg[0]);
+                fileContent.append(String.join("&b", msg)).append("&n");
             }
         } catch (IOException e) {
             response = ("500" + DELIMITER + request[0] + DELIMITER + "Server: Could not create read chat file to string.");
@@ -245,7 +248,7 @@ public class ChatServer extends Thread {
         String timestamp = request[3];
         String msg = request[4];
         Socket receiversSocket = connectedClients.get(receiversName);
-        String outboundMsg = sendersName + DELIMITER + timestamp + DELIMITER + msg;
+        String outboundMsg = ++msgCount + DELIMITER + sendersName + DELIMITER + timestamp + DELIMITER + msg;
 
         saveChatLocally(sendersName, receiversName, outboundMsg);
         saveChatLocally(receiversName, sendersName, outboundMsg);
@@ -260,7 +263,7 @@ public class ChatServer extends Thread {
             }
         }
 
-        response = ("200" + DELIMITER + request[0]);
+        response = ("200" + DELIMITER + request[0] + DELIMITER + msgCount);
     }
 
     synchronized void broadcast(String sendersName) {
@@ -276,7 +279,7 @@ public class ChatServer extends Thread {
                 if (request[0].equals("/broadcast")) {
                     String timestamp = request[2];
                     String msg = request[3];
-                    outboundMsg = (request[0] + DELIMITER + sendersName + DELIMITER + timestamp + DELIMITER + msg);
+                    outboundMsg = ("-1" + DELIMITER + request[0] + DELIMITER + sendersName + DELIMITER + timestamp + DELIMITER + msg);
                     saveChatLocally(sendersName, receiversName, outboundMsg);
                     saveChatLocally(receiversName, sendersName, outboundMsg);
                 }

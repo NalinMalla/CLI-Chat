@@ -5,6 +5,8 @@ import java.net.Socket;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -18,7 +20,7 @@ public class ChatClient extends Thread {
     String outboundMsg = "";
     String sendTo = "";
     String[] clientList;     // We aren't using normal HashMap as like StringBuilder it is not built for multi-threaded operations.
-    ArrayList<String> chatHistory = null;
+    LinkedHashMap<Integer, String> chatHistory = null;      // We aren't using normal HashMap because it doesn't preserve order of insertion.
     AtomicInteger newlyDetectedClients;
     Scanner sc;
     int sleepDuration = 1;
@@ -106,14 +108,16 @@ public class ChatClient extends Thread {
         }
     }
 
-    public ArrayList<String> parseChatHistory(String content) {
-        ArrayList<String> parsedChatHistory = new ArrayList<>();
+    public LinkedHashMap<Integer, String> parseChatHistory(String content) {
+        LinkedHashMap<Integer, String> parsedChatHistory = new LinkedHashMap<>();
 
         if (content != null && !content.isEmpty()) {
             String[] lines = content.split("&n");
             for (String line : lines) {
-                String parsedLine = String.join(DELIMITER, line.split("&b"));
-                parsedChatHistory.add(parsedLine);
+                String[] msg = line.split("&b");
+                int msgID = Integer.parseInt(msg[0]);
+                String parsedLine = msg[1] + DELIMITER + msg[2] + DELIMITER + msg[3] + DELIMITER;
+                parsedChatHistory.put(msgID, parsedLine);
             }
         }
 
@@ -171,10 +175,10 @@ public class ChatClient extends Thread {
         System.out.println("-------------------------------------------");
         System.out.println("To exit this session input '&exit' into the message box and to chat with another client input '&switch'.");
         if (chatHistory != null) {
-            for (String line : chatHistory) {
-                String[] msg = line.split(DELIMITER);
+            for (int msgID : chatHistory.keySet()) {
+                String[] msg = chatHistory.get(msgID).split(DELIMITER);
                 if (msg.length == 3) {
-                    System.out.println(((msg[0].equals(userName)) ? "You" : msg[0]) + " (" + msg[1] + ") : " + msg[2]);
+                    System.out.println("[" + msgID + "] " + ((msg[0].equals(userName)) ? "You" : msg[0]) + " (" + msg[1] + ") : " + msg[2]);
                 }
             }
         } else {
@@ -356,7 +360,7 @@ public class ChatClient extends Thread {
                 unauthorizedErrorCheck();
 
                 if (inboundMsg != null && inboundMsg[0].equals("200") && inboundMsg[1].equals("/message")) {
-                    chatHistory.add(userName + DELIMITER + getCurrentDateTime() + DELIMITER + outboundMsg);
+                    chatHistory.put(Integer.parseInt(inboundMsg[2]), userName + DELIMITER + getCurrentDateTime() + DELIMITER + outboundMsg);
                     outboundMsg = "";
                 }
 
@@ -466,15 +470,15 @@ public class ChatClient extends Thread {
                     }
 
                     if (inboundMsg[0].equals("200") && inboundMsg[1].equals("/syncChatHistory")) {
-                        chatHistory = new ArrayList<String>();
+                        chatHistory = new LinkedHashMap<>();
                         if (inboundMsg.length > 2) {
                             chatHistory = parseChatHistory(inboundMsg[2]);
                         }
                         continue;
                     }
 
-                    if (inboundMsg[0].equals("200") && inboundMsg[1].equals("/message") && inboundMsg.length > 2 && chatHistory != null && inboundMsg[2].equals(sendTo)) {
-                        chatHistory.add(inboundMsg[2] + DELIMITER + inboundMsg[3] + DELIMITER + inboundMsg[4]);
+                    if (inboundMsg[0].equals("200") && inboundMsg[1].equals("/message") && inboundMsg.length > 3 && chatHistory != null && inboundMsg[3].equals(sendTo)) {
+                        chatHistory.put(Integer.parseInt(inboundMsg[2]), inboundMsg[3] + DELIMITER + inboundMsg[4] + DELIMITER + inboundMsg[5]);
                         displayChat();
                     }
                 }
