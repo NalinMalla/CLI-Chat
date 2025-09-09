@@ -284,8 +284,8 @@ public class ChatServer extends Thread {
                     saveChatLocally(receiversName, sendersName, outboundMsg);
                 }
 
-                if (request[0].equals("/broadcastUserList")) {
-                    outboundMsg = (request[0] + DELIMITER + getClientNames());
+                if (request[0].equals("/broadcastUserList") || request[0].equals("/logout")) {
+                    outboundMsg = ("/broadcastUserList" + DELIMITER + getClientNames());
                 }
 
                 if (!outboundMsg.isEmpty()) {
@@ -318,10 +318,16 @@ public class ChatServer extends Thread {
 
                 request = inboundMsg.split(DELIMITER);
                 if (request[0].equals("/logout")) {
-                    sessions.remove(Integer.parseInt(request[1]));
-                    response = ("200" + DELIMITER + request[0] + DELIMITER + "Server: User successfully logged out.");
-                    removeTerminatedSessionsFromFile();
-                    break;
+                    String userName = parseSessionIDToUserName();
+                    if (userName != null) {
+                        connectedClients.remove(userName);
+                        broadcast(userName);
+                        sessions.remove(Integer.parseInt(request[1]));
+                        response = ("200" + DELIMITER + request[0] + DELIMITER + "Server: User successfully logged out.");
+                        removeTerminatedSessionsFromFile();
+                        break;
+                    }
+
                 }
 
                 if (request[0].equals("/users")) {
